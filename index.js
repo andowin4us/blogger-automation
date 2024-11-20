@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const OpenAI = require('openai');
 require('dotenv').config();
 const OAuth2Service = require('./oauth2'); // Import OAuth2 service
+const cron = require('node-cron'); // Import node-cron for scheduling
 
 class AITechBlogAutomation {
     constructor() {
@@ -43,9 +44,10 @@ class AITechBlogAutomation {
             }
         }
 
-        return this.filterUniqueTopics(topics);
+        return this.filterUniqueTopics(topics);  // Ensure this method is used here
     }
 
+    // Extract topics from the RSS feed XML data
     extractTopicsFromRSS(xmlData) {
         const topics = [];
         const titleMatches = xmlData.match(/<title>(.*?)<\/title>/g) || [];
@@ -57,18 +59,39 @@ class AITechBlogAutomation {
             }
         });
 
-        return topics.slice(0, 10);
+        return topics.slice(0, 10);  // Limit to the top 10 topics
     }
 
+    // Ensure unique topics that have not been posted before
     async filterUniqueTopics(topics) {
         const postHistory = await this.readJsonFile(this.HISTORY_FILE, []);
         const uniqueTopics = topics.filter(topic =>
-            !postHistory.includes(this.generateUniqueId(topic))
+            !postHistory.includes(this.generateUniqueId(topic))  // Compare unique ID of topics
         );
-
-        return uniqueTopics.slice(0, 5);
+        return uniqueTopics.slice(0, 5);  // Limit to top 5 new topics
     }
 
+    // Generate a unique ID for a topic (hash the topic title)
+    generateUniqueId(text) {
+        return crypto.createHash('md5').update(text).digest('hex');
+    }
+
+    // Read a JSON file
+    async readJsonFile(filepath, defaultValue = []) {
+        try {
+            const data = await fs.readFile(filepath, 'utf8');
+            return JSON.parse(data);
+        } catch (error) {
+            return defaultValue;
+        }
+    }
+
+    // Write data to a JSON file
+    async writeJsonFile(filepath, data) {
+        await fs.writeFile(filepath, JSON.stringify(data, null, 2));
+    }
+
+    // AI content generation for a topic
     async generateAIContent(topic) {
         try {
             const response = await this.openai.chat.completions.create({
@@ -87,6 +110,7 @@ class AITechBlogAutomation {
         }
     }
 
+    // Post the content to Blogger
     async postToBlogger(topics) {
         // Ensure that the OAuth2 credentials are loaded before posting
         const tokens = await this.oauth2Service.loadTokens();
@@ -124,27 +148,12 @@ class AITechBlogAutomation {
         await this.writeJsonFile(this.HISTORY_FILE, postHistory);
     }
 
-    generateUniqueId(text) {
-        return crypto.createHash('md5').update(text).digest('hex');
-    }
-
-    async readJsonFile(filepath, defaultValue = []) {
-        try {
-            const data = await fs.readFile(filepath, 'utf8');
-            return JSON.parse(data);
-        } catch (error) {
-            return defaultValue;
-        }
-    }
-
-    async writeJsonFile(filepath, data) {
-        await fs.writeFile(filepath, JSON.stringify(data, null, 2));
-    }
-
+    // Delay helper function (to avoid rate limits)
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    // Run the automation
     async run() {
         try {
             // Fetch topics from RSS feed
@@ -164,9 +173,15 @@ class AITechBlogAutomation {
     }
 }
 
-module.exports = AITechBlogAutomation;
-
-if (require.main === module) {
+// Schedule cron job to run every 4 hours
+cron.schedule('0 */4 * * *', async () => {
+    console.log('Running blog automation...');
     const automation = new AITechBlogAutomation();
-    automation.run();
-}
+    await automation.run();
+});
+
+// Run automation once immediately when the script starts
+// if (require.main === module) {
+//     const automation = new AITechBlogAutomation();
+//     automation.run();
+// }
